@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Poisson and Exponential distribution simulation powered by a protected backend API.">
+  <title>Poisson and Exponential Distribution Simulation</title>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.0/dist/chart.umd.min.js"></script>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <h1>Poisson and Exponential Distribution Simulation</h1>
+
+  <p class="subtitle">
+    The interface runs in the browser, while random generation, statistics,
+    distribution calculations, and Excel creation run on the backend server.
+  </p>
+
+  <section class="panel">
+    <div class="status-row">
+      <strong>Backend API</strong>
+      <span id="apiStatus" class="status-badge pending">Checking…</span>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>Simulation controls</h2>
+
+    <div class="control-grid">
+      <label>
+        Event rate λ
+        <input id="lambdaInput" type="number" value="2" min="0.05" max="20" step="0.1">
+      </label>
+
+      <label>
+        Poisson interval T
+        <input id="intervalInput" type="number" value="2" min="0.2" max="20" step="0.1">
+      </label>
+
+      <label>
+        Animation speed
+        <input id="speedInput" type="number" value="1" min="0.2" max="10" step="0.2">
+      </label>
+
+      <label>
+        Maximum Poisson count
+        <input id="maxCountInput" type="number" value="12" min="4" max="50" step="1">
+      </label>
+
+      <label>
+        Exponential histogram bins
+        <input id="binInput" type="number" value="12" min="4" max="40" step="1">
+      </label>
+
+      <div class="button-row">
+        <button id="startButton" class="primary" type="button">Start</button>
+        <button id="pauseButton" type="button">Pause</button>
+        <button id="resetButton" type="button">Reset</button>
+        <button id="exportButton" type="button">Export Results to Excel</button>
+      </div>
+    </div>
+
+    <div id="message" role="status" aria-live="polite"></div>
+  </section>
+
+  <section class="panel">
+    <h2>Meaning of the two distributions</h2>
+
+    <div class="formula-grid">
+      <article class="formula-card">
+        <h3>Poisson distribution</h3>
+        <p>Counts the number of events during a fixed interval of length <strong>T</strong>.</p>
+        <div class="formula">P(N(T) = k) = e<sup>−λT</sup>(λT)<sup>k</sup> / k!</div>
+        <p>Variable type: <strong>discrete</strong>.</p>
+        <p>Possible values: 0, 1, 2, 3, …</p>
+      </article>
+
+      <article class="formula-card">
+        <h3>Exponential distribution</h3>
+        <p>Measures the continuous waiting time between two consecutive events.</p>
+        <div class="formula">f(x) = λe<sup>−λx</sup>, &nbsp; x ≥ 0</div>
+        <p>Variable type: <strong>continuous</strong>.</p>
+        <p>Possible values: every non-negative real number.</p>
+      </article>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>Real-time animation</h2>
+
+    <div class="animation-layout">
+      <article class="animation-box">
+        <h3>Poisson view: events counted in fixed windows</h3>
+        <canvas id="poissonCanvas" class="animation-canvas" width="580" height="250"></canvas>
+        <p class="note">Each vertical block represents one fixed interval of length T.</p>
+      </article>
+
+      <article class="animation-box">
+        <h3>Exponential view: time between events</h3>
+        <canvas id="exponentialCanvas" class="animation-canvas" width="580" height="250"></canvas>
+        <p class="note">Each event creates a new interarrival-time observation.</p>
+      </article>
+    </div>
+
+    <div class="metric-grid">
+      <div class="metric"><span class="metric-label">Simulation time</span><strong id="timeMetric" class="metric-value">0.00</strong></div>
+      <div class="metric"><span class="metric-label">Current interval count</span><strong id="currentCountMetric" class="metric-value">0</strong></div>
+      <div class="metric"><span class="metric-label">Completed Poisson intervals</span><strong id="intervalSamplesMetric" class="metric-value">0</strong></div>
+      <div class="metric"><span class="metric-label">Exponential samples</span><strong id="waitingSamplesMetric" class="metric-value">0</strong></div>
+      <div class="metric"><span class="metric-label">Mean events per interval</span><strong id="meanCountMetric" class="metric-value">0.00</strong></div>
+      <div class="metric"><span class="metric-label">Theoretical λT</span><strong id="theoreticalCountMetric" class="metric-value">4.00</strong></div>
+      <div class="metric"><span class="metric-label">Mean interarrival time</span><strong id="meanWaitingMetric" class="metric-value">0.00</strong></div>
+      <div class="metric"><span class="metric-label">Theoretical 1/λ</span><strong id="theoreticalWaitingMetric" class="metric-value">0.50</strong></div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>Empirical and theoretical distributions</h2>
+
+    <div class="charts-grid">
+      <article class="chart-panel">
+        <h3>Poisson probability mass function</h3>
+        <div class="chart-container"><canvas id="poissonChart"></canvas></div>
+      </article>
+
+      <article class="chart-panel">
+        <h3>Exponential probability density</h3>
+        <div class="chart-container"><canvas id="exponentialChart"></canvas></div>
+      </article>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>Main differences</h2>
+    <table class="explanation-table">
+      <thead><tr><th>Characteristic</th><th>Poisson</th><th>Exponential</th></tr></thead>
+      <tbody>
+        <tr><td>Question answered</td><td>How many events occur during a fixed interval?</td><td>How long must we wait until the next event?</td></tr>
+        <tr><td>Random variable</td><td>Number of events</td><td>Time between events</td></tr>
+        <tr><td>Variable type</td><td>Discrete</td><td>Continuous</td></tr>
+        <tr><td>Expected value</td><td>E[N(T)] = λT</td><td>E[X] = 1/λ</td></tr>
+        <tr><td>Typical logistics example</td><td>Number of trucks arriving at a gate within one hour.</td><td>Time between consecutive truck arrivals.</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <footer class="copyright-footer">
+    © 2026 Nguyen Minh Quy – OSE.vn. All rights reserved.
+  </footer>
+
+  <script src="config.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
