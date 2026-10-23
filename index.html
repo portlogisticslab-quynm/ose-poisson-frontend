@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="description" content="Poisson and Exponential distribution simulation powered by a protected backend API.">
+  <meta name="description" content="Interactive Poisson and Exponential distribution simulation that runs entirely in your browser.">
   <title>Poisson and Exponential Distribution Simulation</title>
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.0/dist/chart.umd.min.js"></script>
@@ -13,14 +13,14 @@
   <h1>Poisson and Exponential Distribution Simulation</h1>
 
   <p class="subtitle">
-    The interface runs in the browser, while random generation, statistics,
-    distribution calculations, and Excel creation run on the backend server.
+    Everything runs in your browser: random generation, statistics,
+    distribution calculations and Excel creation. No data is sent to a server.
   </p>
 
   <section class="panel">
     <div class="status-row">
-      <strong>Backend API</strong>
-      <span id="apiStatus" class="status-badge pending">Checking…</span>
+      <strong>Computation engine</strong>
+      <span id="apiStatus" class="status-badge pending">Loading…</span>
     </div>
   </section>
 
@@ -149,7 +149,7 @@
     © 2026 Nguyen Minh Quy – portlogistics.vn. All rights reserved.
   </footer>
 
-  <script src="config.js?v=4"></script>
-  <script src="app.js?v=20260928-3"></script>
+  <script src="sim-engine.js?v=20261024-1"></script>
+  <script src="app.js?v=20261024-1"></script>
 </body>
 </html>

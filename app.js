@@ -1,8 +1,14 @@
 "use strict";
 
-const API_BASE = String(window.OSE_API_BASE || "").replace(/\/$/, "");
+/*
+  All computation runs in the browser (sim-engine.js) — no backend call.
+  Timing is kept identical to the former backend version:
+  0.09 × speed simulated time units every 180 ms of real time.
+*/
 const STEP_REAL_MS = 180;
 const BASE_SIMULATED_DELTA = 0.09;
+const MAX_FRAME_MS = 250;   // a tab that was hidden does not jump far ahead
+const XLSX_URL = "https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js";
 
 const lambdaInput = document.getElementById("lambdaInput");
 const intervalInput = document.getElementById("intervalInput");
@@ -31,10 +37,11 @@ const poissonContext = poissonCanvas.getContext("2d");
 const exponentialCanvas = document.getElementById("exponentialCanvas");
 const exponentialContext = exponentialCanvas.getContext("2d");
 
-let sessionId = null;
+let simulation = null;
 let snapshot = null;
-let timerId = null;
-let requestInFlight = false;
+let frameId = null;
+let lastFrameTime = null;
+let speed = 1;
 
 function setMessage(text, success = false) {
   message.textContent = text;
@@ -53,173 +60,122 @@ function getParameters() {
     max_count: Number(maxCountInput.value),
     number_of_bins: Number(binInput.value)
   };
+  const speedValue = Number(speedInput.value);
 
-  const speed = Number(speedInput.value);
-
-  if (!Number.isFinite(parameters.lambda_rate) || parameters.lambda_rate <= 0) {
-    setMessage("λ must be greater than zero.");
+  try {
+    PoissonEngine.validateParameters(parameters);
+  } catch (error) {
+    setMessage(error.message);
     return null;
   }
-  if (!Number.isFinite(parameters.interval_length) || parameters.interval_length <= 0) {
-    setMessage("The Poisson interval T must be greater than zero.");
-    return null;
-  }
-  if (!Number.isInteger(parameters.max_count) || parameters.max_count < 4) {
-    setMessage("Maximum Poisson count must be an integer of at least 4.");
-    return null;
-  }
-  if (!Number.isInteger(parameters.number_of_bins) || parameters.number_of_bins < 4) {
-    setMessage("Histogram bins must be an integer of at least 4.");
-    return null;
-  }
-  if (!Number.isFinite(speed) || speed <= 0) {
+  if (!Number.isFinite(speedValue) || speedValue <= 0) {
     setMessage("Animation speed must be greater than zero.");
     return null;
   }
 
   setMessage("");
-  return { parameters, speed };
+  return { parameters, speed: speedValue };
 }
 
-async function apiFetch(path, options = {}) {
-  const response = await fetch(`${API_BASE}${path}`, {
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...(options.headers || {})
-    }
-  });
-
-  if (!response.ok) {
-    let detail = `${response.status} ${response.statusText}`;
-    try {
-      const body = await response.json();
-      detail = body.detail || detail;
-    } catch (_) {}
-    throw new Error(detail);
-  }
-
-  return response;
-}
-
-async function checkHealth() {
-  try {
-    const response = await apiFetch("/api/health", { method: "GET" });
-    const data = await response.json();
-    setApiStatus(`Online – ${data.version}`, "ok");
-  } catch (error) {
-    setApiStatus("Offline", "error");
-    setMessage(`Cannot connect to backend: ${error.message}`);
-  }
-}
-
-async function createSession() {
+function createSession() {
   const values = getParameters();
   if (!values) return false;
-
-  const response = await apiFetch("/api/sessions", {
-    method: "POST",
-    body: JSON.stringify(values.parameters)
-  });
-
-  snapshot = await response.json();
-  sessionId = snapshot.session_id;
+  simulation = new PoissonEngine.PoissonSimulation(values.parameters);
+  speed = values.speed;
+  snapshot = simulation.snapshot();
   renderSnapshot(snapshot);
   return true;
 }
 
-async function resetSimulation() {
+function resetSimulation() {
   pauseSimulation();
-  requestInFlight = false;
-
-  try {
-    if (sessionId) {
-      await apiFetch(`/api/sessions/${sessionId}`, { method: "DELETE" });
-    }
-    sessionId = null;
-    snapshot = null;
-    await createSession();
-    setMessage("Simulation reset.", true);
-  } catch (error) {
-    setMessage(`Reset failed: ${error.message}`);
-  }
+  simulation = null;
+  snapshot = null;
+  if (createSession()) setMessage("Simulation reset.", true);
 }
 
-async function simulationStep() {
-  if (requestInFlight || !sessionId) return;
+function animationFrame(now) {
+  if (lastFrameTime === null) lastFrameTime = now;
+  const elapsed = Math.min(now - lastFrameTime, MAX_FRAME_MS);
+  lastFrameTime = now;
 
-  const values = getParameters();
-  if (!values) {
-    pauseSimulation();
-    return;
-  }
-
-  requestInFlight = true;
   try {
-    const response = await apiFetch(`/api/sessions/${sessionId}/step`, {
-      method: "POST",
-      body: JSON.stringify({ delta_time: BASE_SIMULATED_DELTA * values.speed })
-    });
-    snapshot = await response.json();
+    simulation.step(BASE_SIMULATED_DELTA * speed * (elapsed / STEP_REAL_MS));
+    snapshot = simulation.snapshot();
     renderSnapshot(snapshot);
   } catch (error) {
     pauseSimulation();
     setMessage(`Simulation failed: ${error.message}`);
-  } finally {
-    requestInFlight = false;
+    return;
   }
+  frameId = window.requestAnimationFrame(animationFrame);
 }
 
-async function startSimulation() {
-  if (!sessionId) {
-    try {
-      const created = await createSession();
-      if (!created) return;
-    } catch (error) {
-      setMessage(`Start failed: ${error.message}`);
-      return;
-    }
-  }
+function startSimulation() {
+  if (!simulation && !createSession()) return;
+  const values = getParameters();
+  if (!values) return;
+  speed = values.speed;
 
-  if (timerId !== null) return;
+  if (frameId !== null) return;
   setMessage("Simulation running…", true);
-  timerId = window.setInterval(simulationStep, STEP_REAL_MS);
+  lastFrameTime = null;
+  frameId = window.requestAnimationFrame(animationFrame);
 }
 
 function pauseSimulation() {
-  if (timerId !== null) {
-    window.clearInterval(timerId);
-    timerId = null;
+  if (frameId !== null) {
+    window.cancelAnimationFrame(frameId);
+    frameId = null;
   }
+  lastFrameTime = null;
+}
+
+let xlsxLoading = null;
+function loadXlsx() {
+  if (window.XLSX) return Promise.resolve(window.XLSX);
+  if (!xlsxLoading) {
+    xlsxLoading = new Promise((resolve, reject) => {
+      const script = document.createElement("script");
+      script.src = XLSX_URL;
+      script.onload = () => resolve(window.XLSX);
+      script.onerror = () => { xlsxLoading = null; reject(new Error("could not load the Excel library (check the internet connection)")); };
+      document.head.appendChild(script);
+    });
+  }
+  return xlsxLoading;
+}
+
+function timestamp() {
+  const d = new Date();
+  const p = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
 }
 
 async function exportResultsToExcel() {
-  if (!sessionId) {
+  if (!simulation) {
     setMessage("Start or reset the simulation first.");
     return;
   }
 
   pauseSimulation();
+  exportButton.disabled = true;
   try {
-    const response = await fetch(`${API_BASE}/api/sessions/${sessionId}/export.xlsx`);
-    if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
-
-    const blob = await response.blob();
-    const disposition = response.headers.get("Content-Disposition") || "";
-    const match = disposition.match(/filename="?([^";]+)"?/i);
-    const fileName = match ? match[1] : "Poisson_Exponential_Results.xlsx";
-
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = fileName;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    URL.revokeObjectURL(url);
+    setMessage("Preparing the Excel file…", true);
+    const XLSX = await loadXlsx();
+    const workbook = XLSX.utils.book_new();
+    for (const sheet of simulation.workbookSheets()) {
+      const ws = XLSX.utils.aoa_to_sheet(sheet.rows);
+      ws["!cols"] = sheet.widths.map((wch) => ({ wch }));
+      XLSX.utils.book_append_sheet(workbook, ws, sheet.name);
+    }
+    const fileName = `Poisson_Exponential_Results_${timestamp()}.xlsx`;
+    XLSX.writeFile(workbook, fileName, { compression: true });
     setMessage(`Results exported: ${fileName}`, true);
   } catch (error) {
     setMessage(`Excel export failed: ${error.message}`);
+  } finally {
+    exportButton.disabled = false;
   }
 }
 
@@ -376,8 +332,6 @@ function drawExponentialAnimation(data) {
   ctx.fillText(latest, 145, 220);
 }
 
-[startButton, pauseButton, resetButton, exportButton].forEach(button => button.disabled = true);
-
 startButton.addEventListener("click", startSimulation);
 pauseButton.addEventListener("click", pauseSimulation);
 resetButton.addEventListener("click", resetSimulation);
@@ -386,12 +340,18 @@ exportButton.addEventListener("click", exportResultsToExcel);
 for (const input of [lambdaInput, intervalInput, maxCountInput, binInput]) {
   input.addEventListener("change", resetSimulation);
 }
-speedInput.addEventListener("change", getParameters);
+speedInput.addEventListener("change", () => {
+  const values = getParameters();
+  if (values) speed = values.speed;
+});
 
-(async function initialize() {
-  await checkHealth();
-  if (apiStatus.classList.contains("ok")) {
-    [startButton, pauseButton, resetButton, exportButton].forEach(button => button.disabled = false);
-    await resetSimulation();
+(function initialize() {
+  if (!window.PoissonEngine) {
+    setApiStatus("Engine not loaded", "error");
+    setMessage("sim-engine.js could not be loaded. Reload the page.");
+    [startButton, pauseButton, resetButton, exportButton].forEach(button => button.disabled = true);
+    return;
   }
+  setApiStatus(`In browser – v${PoissonEngine.ENGINE_VERSION}`, "ok");
+  resetSimulation();
 })();
